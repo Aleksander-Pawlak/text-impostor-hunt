@@ -1,10 +1,11 @@
 # Text Impostor Hunt 🕵️‍♂️
 
-A machine learning project for detecting fake/AI-generated text versus real human-written text using linguistic and statistical features.
+A machine learning project for comparing AI-generated texts to determine which one more closely resembles a human-written reference, using linguistic and statistical features.
 
 ## Overview
 
-This project analyzes text pairs to distinguish between real human-written content and fake/AI-generated content. It uses various text analysis techniques including language detection, character encoding analysis, readability metrics, and linguistic features to train an XGBoost classifier.
+This project analyzes pairs of AI-generated texts alongside a human-written reference to identify which generated text is more similar to the original. It uses various text analysis techniques including language detection, character encoding analysis, readability metrics, and linguistic features to train an XGBoost classifier.
+
 
 ## Features
 
