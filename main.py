@@ -302,10 +302,197 @@ feature_importances = pipeline.named_steps['xgb'].feature_importances_
 sorted_indices = np.argsort(feature_importances)[::-1]
 top_n = min(20, len(X_train.columns))  # Ensure we don't exceed available columns
 
-plt.bar(range(top_n), feature_importances[sorted_indices][:top_n], align='center')
-plt.xticks(range(top_n), [X_train.columns[i] for i in sorted_indices[:top_n]], rotation=90)
-plt.xlabel("Features")
-plt.ylabel("Importance")
-plt.title(f"Top {top_n} Feature Importances")
+visualize_data_feat_importance = input("Do you want to visualize the feature importances? (yes/no): ").strip().lower()
+if visualize_data_feat_importance == 'yes':
+    print("Visualizing feature importances...")
+    plt.bar(range(top_n), feature_importances[sorted_indices][:top_n], align='center')
+    plt.xticks(range(top_n), [X_train.columns[i] for i in sorted_indices[:top_n]], rotation=90)
+    plt.xlabel("Features")
+    plt.ylabel("Importance")
+    plt.title(f"Top {top_n} Feature Importances")
+    plt.tight_layout()
+    plt.show()
+
+# Ensemble Model with Multiple Random Seeds
+print("\n\nBuilding Ensemble Model (9 XGBoost models)")
+
+from collections import Counter
+
+# Define different random seeds for ensemble
+ensemble_seeds = [42, 123, 456, 789, 741, 258, 963, 735, 846]
+ensemble_models = []
+ensemble_predictions = []
+
+# Train 9 models with different random seeds
+for i, seed in enumerate(ensemble_seeds):
+    print(f"Training model {i+1}/9 with random seed {seed}...")
+    
+    # Create model with different random seed
+    xgb_ensemble = XGBClassifier(
+        use_label_encoder=False, 
+        eval_metric='logloss', 
+        random_state=seed
+    )
+    
+    # Create pipeline
+    ensemble_pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('xgb', xgb_ensemble)
+    ])
+    
+    # Fit the model
+    ensemble_pipeline.fit(X_train_split, y_train_split)
+    
+    # Make predictions on validation set
+    y_pred_ensemble = ensemble_pipeline.predict(X_val)
+    ensemble_predictions.append(y_pred_ensemble)
+    ensemble_models.append(ensemble_pipeline)
+    
+    # Print individual model accuracy
+    individual_accuracy = accuracy_score(y_val, y_pred_ensemble)
+    print(f"  Model {i+1} accuracy: {individual_accuracy:.4f}")
+
+# Majority voting for final predictions
+print("\nPerforming majority voting...")
+final_predictions = []
+
+for i in range(len(y_val)):
+    # Get predictions from all 9 models for this sample
+    votes = [pred[i] for pred in ensemble_predictions]
+    
+    # Count votes (0 = fake, 1 = real)
+    vote_counts = Counter(votes)
+    
+    # Choose majority vote (in case of tie, choose 0)
+    final_pred = vote_counts.most_common(1)[0][0]
+    final_predictions.append(final_pred)
+
+final_predictions = np.array(final_predictions)
+
+# Evaluate ensemble performance
+ensemble_accuracy = accuracy_score(y_val, final_predictions)
+print(f"\nEnsemble Results:")
+print(f"Ensemble Accuracy: {ensemble_accuracy:.4f}")
+print(f"Improvement over single model: {ensemble_accuracy - accuracy_score(y_val, y_pred):.4f}")
+print("\nEnsemble Classification Report:")
+print(classification_report(y_val, final_predictions))
+print("\nEnsemble Confusion Matrix:")
+print(confusion_matrix(y_val, final_predictions))
+
+# Visualize ensemble vs individual model performance
+plt.figure(figsize=(12, 6))
+individual_accuracies = [accuracy_score(y_val, pred) for pred in ensemble_predictions]
+model_names = [f'Model {i+1}' for i in range(9)] + ['Ensemble']
+accuracies = individual_accuracies + [ensemble_accuracy]
+
+plt.bar(model_names, accuracies, color=['lightblue']*9 + ['darkblue'])
+plt.axhline(y=accuracy_score(y_val, y_pred), color='red', linestyle='--', label='Original Single Model')
+plt.title('Individual Model vs Ensemble Performance')
+plt.ylabel('Accuracy')
+plt.xticks(rotation=45)
+plt.legend()
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
+
+print(f"\nEnsemble Summary:")
+print(f"Number of models: {len(ensemble_models)}")
+print(f"Best individual model accuracy: {max(individual_accuracies):.4f}")
+print(f"Worst individual model accuracy: {min(individual_accuracies):.4f}")
+print(f"Average individual model accuracy: {np.mean(individual_accuracies):.4f}")
+print(f"Ensemble accuracy: {ensemble_accuracy:.4f}")
+print(f"Standard deviation of individual models: {np.std(individual_accuracies):.4f}")
+
+# Analysis: Better Approaches for Small Datasets
+print("\n" + "="*60)
+print("SMALL DATASET ANALYSIS & RECOMMENDATIONS")
+print("="*60)
+
+print(f"Dataset Size Analysis:")
+print(f"Total training samples: {len(X_train)}")
+print(f"Training split size: {len(X_train_split)}")
+print(f"Validation split size: {len(X_val)}")
+print(f"Features per sample: {len(X_train.columns)}")
+
+# Calculate the ratio of features to samples (curse of dimensionality indicator)
+feature_to_sample_ratio = len(X_train.columns) / len(X_train_split)
+print(f"Feature-to-sample ratio: {feature_to_sample_ratio:.2f}")
+
+if feature_to_sample_ratio > 0.1:
+    print("⚠️  WARNING: High feature-to-sample ratio suggests potential overfitting!")
+
+if len(X_val) < 20:
+    print("⚠️  WARNING: Validation set too small for reliable accuracy estimates!")
+
+print(f"\nRecommendations for small datasets:")
+print("1. Use Cross-Validation instead of train/val split")
+print("2. Apply regularization (L1/L2) to prevent overfitting")
+print("3. Reduce feature dimensions (PCA, feature selection)")
+print("4. Use simpler models (fewer parameters)")
+print("5. Bootstrap sampling for confidence intervals")
+
+# Demonstrate Cross-Validation approach
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.metrics import make_scorer
+
+print(f"\n" + "="*50)
+print("CROSS-VALIDATION APPROACH (RECOMMENDED)")
+print("="*50)
+
+# Use the full training data for cross-validation
+cv_folds = min(5, len(y_train) // 2)  # Ensure at least 2 samples per fold
+print(f"Using {cv_folds}-fold cross-validation...")
+
+cv_scores = cross_val_score(
+    pipeline, X_train, y_train, 
+    cv=StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42),
+    scoring='accuracy'
+)
+
+print(f"Cross-validation scores: {cv_scores}")
+print(f"Mean CV accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+print(f"This gives us a more reliable estimate with confidence intervals!")
+
+# Feature importance with regularization
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_selection import SelectKBest, f_classif
+
+print(f"\n" + "="*50)
+print("SIMPLIFIED MODEL WITH FEATURE SELECTION")
+print("="*50)
+
+# Select top 10 most important features
+selector = SelectKBest(score_func=f_classif, k=min(10, len(X_train.columns)))
+X_train_selected = selector.fit_transform(X_train, y_train)
+
+# Use simpler, regularized model
+simple_model = Pipeline([
+    ('scaler', StandardScaler()),
+    ('logistic', LogisticRegression(C=0.1, random_state=42))  # High regularization
+])
+
+# Cross-validate the simpler model
+simple_cv_scores = cross_val_score(
+    simple_model, X_train_selected, y_train,
+    cv=StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=42),
+    scoring='accuracy'
+)
+
+print(f"Simplified model CV scores: {simple_cv_scores}")
+print(f"Simplified model mean accuracy: {simple_cv_scores.mean():.4f} (+/- {simple_cv_scores.std() * 2:.4f})")
+
+# Get selected feature names
+selected_features = X_train.columns[selector.get_support()]
+print(f"Selected features: {list(selected_features)}")
+
+print(f"\n" + "="*60)
+print("CONCLUSION")
+print("="*60)
+print("For small datasets like yours:")
+print("✅ Cross-validation > Train/val split")
+print("✅ Simpler models > Complex ensembles") 
+print("✅ Feature selection > All features")
+print("✅ Regularization > No regularization")
+print("✅ Confidence intervals > Point estimates")
+print("\nEnsemble methods work best with larger datasets (1000+ samples)")
+print("where individual models can learn diverse patterns.")
